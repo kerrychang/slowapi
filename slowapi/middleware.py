@@ -30,7 +30,7 @@ def _get_route_name(handler: Callable):
     return f"{handler.__module__}.{handler.__name__}"
 
 
-def _check_limits(
+async def _check_limits(
     limiter: Limiter, request: Request, handler: Optional[Callable], app: Starlette
 ) -> Tuple[Optional[Callable], bool, Optional[Exception]]:
     """
@@ -44,7 +44,7 @@ def _check_limits(
         request.state, "_rate_limiting_complete", False
     ):
         try:
-            limiter._check_request_limit(request, handler, True)
+            await limiter._check_request_limit(request, handler, True)
         except Exception as e:
             # handle the exception since the global exception handler won't pick it up if we call_next
             exception_handler = app.exception_handlers.get(
@@ -85,7 +85,7 @@ async def async_check_limits(
     whether we should inject headers or not.
     Used in our ASGI middleware, this support both synchronous or asynchronous exception handlers.
     """
-    exception_handler, _bool, exc = _check_limits(limiter, request, handler, app)
+    exception_handler, _bool, exc = await _check_limits(limiter, request, handler, app)
     if not exception_handler:
         return None, _bool
 
@@ -127,7 +127,7 @@ class SlowAPIMiddleware(BaseHTTPMiddleware):
         if _should_exempt(limiter, handler):
             return await call_next(request)
 
-        error_response, should_inject_headers = sync_check_limits(
+        error_response, should_inject_headers = await async_check_limits(
             limiter, request, handler, app
         )
         if error_response is not None:
@@ -169,7 +169,7 @@ class _ASGIMiddlewareResponder:
 
             if self.inject_headers:
                 headers = MutableHeaders(raw=self.initial_message["headers"])
-                headers = self.limiter._inject_asgi_headers(
+                headers = await self.limiter._inject_asgi_headers(
                     headers, self.request.state.view_rate_limit
                 )
 

@@ -27,7 +27,7 @@ from typing import (
 from limits import RateLimitItem  # type: ignore
 from limits.errors import ConfigurationError  # type: ignore
 from limits.storage import MemoryStorage, storage_from_string  # type: ignore
-from limits.strategies import STRATEGIES, RateLimiter  # type: ignore
+from limits.aio.strategies import STRATEGIES, RateLimiter  # type: ignore
 from starlette.config import Config
 from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
@@ -428,7 +428,7 @@ class Limiter:
                     raise
         return response
 
-    def _inject_asgi_headers(
+    async def _inject_asgi_headers(
         self, headers: MutableHeaders, current_limit: Tuple[RateLimitItem, List[str]]
     ) -> MutableHeaders:
         """
@@ -440,7 +440,7 @@ class Limiter:
         """
         if self.enabled and self._headers_enabled and current_limit is not None:
             try:
-                window_stats: Tuple[int, int] = self.limiter.get_window_stats(
+                window_stats: Tuple[int, int] = await self.limiter.get_window_stats(
                     current_limit[0], *current_limit[1]
                 )
                 reset_in = 1 + window_stats[0]
@@ -480,7 +480,7 @@ class Limiter:
                     raise
         return headers
 
-    def __evaluate_limits(
+    async def __evaluate_limits(
         self, request: Request, endpoint: str, limits: List[Limit]
     ) -> None:
         failed_limit = None
@@ -507,7 +507,7 @@ class Limiter:
                     limit_for_header = (lim.limit, args)
 
                 cost = lim.cost(request) if callable(lim.cost) else lim.cost
-                if not self.limiter.hit(lim.limit, *args, cost=cost):
+                if not await self.limiter.hit(lim.limit, *args, cost=cost):
                     self.logger.warning(
                         "ratelimit %s (%s) exceeded at endpoint: %s",
                         lim.limit,
@@ -548,7 +548,7 @@ class Limiter:
 
         return int(time.time() + retry_after_int)
 
-    def _check_request_limit(
+    async def _check_request_limit(
         self,
         request: Request,
         endpoint_func: Optional[Callable[..., Any]],
@@ -628,7 +628,7 @@ class Limiter:
                 ):
                     all_limits += list(itertools.chain(*self._default_limits))
             # actually check the limits, so far we've only computed the list of limits to check
-            self.__evaluate_limits(request, _endpoint_key, all_limits)
+            await self.__evaluate_limits(request, _endpoint_key, all_limits)
         except Exception as e:  # no qa
             if isinstance(e, RateLimitExceeded):
                 raise
@@ -728,7 +728,7 @@ class Limiter:
                         if self._auto_check and not getattr(
                             request.state, "_rate_limiting_complete", False
                         ):
-                            self._check_request_limit(request, func, False)
+                            await self._check_request_limit(request, func, False)
                             request.state._rate_limiting_complete = True
                     response = await func(*args, **kwargs)  # type: ignore
                     if self.enabled:
